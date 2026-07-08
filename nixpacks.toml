@@ -1,5 +1,5 @@
 [phases.setup]
-nixPkgs = ["dotnet-sdk_9"]
+nixPkgs = ["dotnetCorePackages.sdk_9_0"]
 
 [phases.build]
 cmds = ["dotnet publish src/FleetControl.WebAPI/FleetControl.WebAPI.csproj -c Release -o out"]
