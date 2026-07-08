@@ -5,12 +5,11 @@ cmds = [
   "./dotnet-install.sh --version 9.0.100 --install-dir /usr/share/dotnet"
 ]
 
-[env]
-PATH = "/usr/share/dotnet:$PATH"
-DOTNET_ROOT = "/usr/share/dotnet"
+[phases.install]
+cmds = ["/usr/share/dotnet/dotnet restore"]
 
 [phases.build]
-cmds = ["dotnet publish src/FleetControl.WebAPI/FleetControl.WebAPI.csproj -c Release -o out"]
+cmds = ["/usr/share/dotnet/dotnet publish src/FleetControl.WebAPI/FleetControl.WebAPI.csproj -c Release -o out"]
 
 [start]
-cmd = "dotnet out/FleetControl.WebAPI.dll"
+cmd = "/usr/share/dotnet/dotnet out/FleetControl.WebAPI.dll"
