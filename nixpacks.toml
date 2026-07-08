@@ -1,5 +1,10 @@
 [phases.setup]
-nixPkgs = ["dotnetCorePackages.sdk_9_0"]
+cmds = [
+  "curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh",
+  "chmod +x dotnet-install.sh",
+  "./dotnet-install.sh --version 9.0.100 --install-dir /usr/share/dotnet",
+  "ln -s /usr/share/dotnet/dotnet /usr/bin/dotnet"
+]
 
 [phases.build]
 cmds = ["dotnet publish src/FleetControl.WebAPI/FleetControl.WebAPI.csproj -c Release -o out"]
