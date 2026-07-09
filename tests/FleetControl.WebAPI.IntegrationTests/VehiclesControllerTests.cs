@@ -192,6 +192,20 @@ public class VehiclesControllerTests : IClassFixture<CustomWebApplicationFactory
     [Fact]
     public async Task ReportMileage_ComoConductorAsignado_DebeRetornar200()
     {
+        // Se asigna el conductor explicitamente en esta misma prueba (en vez de
+        // depender del seed o del orden de ejecucion de otras pruebas de la
+        // clase, que xUnit no garantiza) para que sea autocontenida.
+        var adminClient = CreateAuthenticatedClient(_factory.AdminTenantAId);
+        await adminClient.PutAsJsonAsync($"/api/vehicles/{_factory.VehicleTenantAId}", new
+        {
+            brand = "Toyota",
+            model = "Hilux",
+            color = "Blanco",
+            currentMileage = 10000,
+            assignedDriverId = _factory.DriverTenantAId,
+            status = 0
+        });
+
         var client = CreateAuthenticatedClient(_factory.DriverTenantAId);
 
         var response = await client.PostAsJsonAsync($"/api/vehicles/{_factory.VehicleTenantAId}/report-mileage", new { newMileage = 99999 });
