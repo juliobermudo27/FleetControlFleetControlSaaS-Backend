@@ -1,0 +1,178 @@
+using FleetControl.Application.Common.Interfaces;
+using FleetControl.Application.DTOs;
+using FleetControl.Application.Exceptions;
+using FleetControl.Application.Services;
+using FleetControl.Domain.Entities;
+using FleetControl.Domain.Enums;
+using FleetControl.Infrastructure.Persistence;
+using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Moq;
+using Xunit;
+
+namespace FleetControl.Application.UnitTests.Services;
+
+/// <summary>
+/// Pruebas de UserService: perfil del usuario actual, listado de usuarios
+/// del tenant (solo Admin) e invitacion de usuarios nuevos (crea el usuario
+/// en Supabase Auth via ISupabaseAuthAdminService y el perfil en public.users).
+/// </summary>
+public class UserServiceTests : IDisposable
+{
+    private readonly ApplicationDbContext _context;
+    private readonly Mock<ICurrentUserService> _currentUserMock = new();
+    private readonly Mock<ISupabaseAuthAdminService> _authAdminMock = new();
+    private readonly Guid _tenantId = Guid.NewGuid();
+
+    public UserServiceTests()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        _context = new ApplicationDbContext(options);
+        _currentUserMock.SetupGet(u => u.TenantId).Returns(_tenantId);
+    }
+
+    private UserService CreateSut() => new(_context, _currentUserMock.Object, _authAdminMock.Object);
+
+    private AppUser AddUser(string fullName, string email, UserRole role = UserRole.Driver, bool isActive = true)
+    {
+        var user = new AppUser { TenantId = _tenantId, FullName = fullName, Email = email, Role = role, IsActive = isActive };
+        _context.Users.Add(user);
+        _context.SaveChanges();
+        return user;
+    }
+
+    [Fact]
+    public async Task GetCurrentUserAsync_DebeRetornarElUsuarioActual()
+    {
+        var user = AddUser("Julio Bermudo", "julio@test.com", UserRole.Admin);
+        _currentUserMock.SetupGet(u => u.UserId).Returns(user.Id);
+        var sut = CreateSut();
+
+        var result = await sut.GetCurrentUserAsync();
+
+        result.Id.Should().Be(user.Id);
+        result.FullName.Should().Be("Julio Bermudo");
+        result.Role.Should().Be("admin");
+    }
+
+    [Fact]
+    public async Task GetCurrentUserAsync_DebeLanzarNotFound_SiElUsuarioNoExiste()
+    {
+        _currentUserMock.SetupGet(u => u.UserId).Returns(Guid.NewGuid());
+        var sut = CreateSut();
+
+        var act = async () => await sut.GetCurrentUserAsync();
+
+        await act.Should().ThrowAsync<NotFoundException>();
+    }
+
+    [Fact]
+    public async Task GetTenantUsersAsync_DebeLanzarForbidden_CuandoNoEsAdmin()
+    {
+        _currentUserMock.SetupGet(u => u.IsAdmin).Returns(false);
+        var sut = CreateSut();
+
+        var act = async () => await sut.GetTenantUsersAsync();
+
+        await act.Should().ThrowAsync<ForbiddenAccessException>();
+    }
+
+    [Fact]
+    public async Task GetTenantUsersAsync_DebeRetornarUsuariosOrdenadosPorNombre()
+    {
+        _currentUserMock.SetupGet(u => u.IsAdmin).Returns(true);
+        AddUser("Zoila Torres", "zoila@test.com");
+        AddUser("Ana Ramos", "ana@test.com");
+        var sut = CreateSut();
+
+        var result = await sut.GetTenantUsersAsync();
+
+        result.Should().HaveCount(2);
+        result[0].FullName.Should().Be("Ana Ramos");
+        result[1].FullName.Should().Be("Zoila Torres");
+    }
+
+    [Fact]
+    public async Task InviteUserAsync_DebeLanzarForbidden_CuandoNoEsAdmin()
+    {
+        _currentUserMock.SetupGet(u => u.IsAdmin).Returns(false);
+        var sut = CreateSut();
+        var dto = new InviteUserDto("Conductor Nuevo", "nuevo@test.com", "driver", null);
+
+        var act = async () => await sut.InviteUserAsync(dto);
+
+        await act.Should().ThrowAsync<ForbiddenAccessException>();
+        _authAdminMock.Verify(a => a.InviteUserByEmailAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("superadmin")]
+    [InlineData("")]
+    [InlineData("Admin")]
+    public async Task InviteUserAsync_DebeLanzarExcepcion_SiElRolNoEsValido(string invalidRole)
+    {
+        _currentUserMock.SetupGet(u => u.IsAdmin).Returns(true);
+        var sut = CreateSut();
+        var dto = new InviteUserDto("Alguien", "alguien@test.com", invalidRole, null);
+
+        var act = async () => await sut.InviteUserAsync(dto);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task InviteUserAsync_DebeLanzarExcepcion_SiYaExisteElCorreoEnElTenant()
+    {
+        _currentUserMock.SetupGet(u => u.IsAdmin).Returns(true);
+        AddUser("Existente", "duplicado@test.com");
+        var sut = CreateSut();
+        var dto = new InviteUserDto("Otro", "duplicado@test.com", "driver", null);
+
+        var act = async () => await sut.InviteUserAsync(dto);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        _authAdminMock.Verify(a => a.InviteUserByEmailAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task InviteUserAsync_DebeCrearElUsuario_ConElIdDevueltoPorSupabase()
+    {
+        _currentUserMock.SetupGet(u => u.IsAdmin).Returns(true);
+        _currentUserMock.SetupGet(u => u.TenantId).Returns(_tenantId);
+        var newUserId = Guid.NewGuid();
+        _authAdminMock.Setup(a => a.InviteUserByEmailAsync("conductor@test.com", It.IsAny<CancellationToken>())).ReturnsAsync(newUserId);
+
+        var sut = CreateSut();
+        var dto = new InviteUserDto("Conductor Nuevo", "conductor@test.com", "driver", "987654321");
+
+        var result = await sut.InviteUserAsync(dto);
+
+        result.Id.Should().Be(newUserId);
+        result.Role.Should().Be("driver");
+        result.Phone.Should().Be("987654321");
+
+        var persisted = await _context.Users.FirstAsync(u => u.Id == newUserId);
+        persisted.TenantId.Should().Be(_tenantId);
+        persisted.Role.Should().Be(UserRole.Driver);
+        persisted.IsActive.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task InviteUserAsync_DebeCrearElUsuario_ConRolAdmin()
+    {
+        _currentUserMock.SetupGet(u => u.IsAdmin).Returns(true);
+        _authAdminMock.Setup(a => a.InviteUserByEmailAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(Guid.NewGuid());
+
+        var sut = CreateSut();
+        var dto = new InviteUserDto("Otro Admin", "otroadmin@test.com", "admin", null);
+
+        var result = await sut.InviteUserAsync(dto);
+
+        result.Role.Should().Be("admin");
+    }
+
+    public void Dispose() => _context.Dispose();
+}

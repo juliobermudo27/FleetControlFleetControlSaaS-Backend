@@ -66,6 +66,13 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
             services.AddSingleton<FakeSupabaseStorageService>();
             services.AddSingleton<FleetControl.Application.Common.Interfaces.ISupabaseStorageService>(p => p.GetRequiredService<FakeSupabaseStorageService>());
 
+            // 3.c Idem para el servicio de administracion de Supabase Auth
+            // (usado por la invitacion de usuarios nuevos).
+            var authAdminDescriptors = services.Where(d => d.ServiceType == typeof(FleetControl.Application.Common.Interfaces.ISupabaseAuthAdminService) || d.ImplementationType == typeof(FleetControl.Infrastructure.Services.SupabaseAuthAdminService)).ToList();
+            foreach (var d in authAdminDescriptors) services.Remove(d);
+            services.AddSingleton<FakeSupabaseAuthAdminService>();
+            services.AddSingleton<FleetControl.Application.Common.Interfaces.ISupabaseAuthAdminService>(p => p.GetRequiredService<FakeSupabaseAuthAdminService>());
+
             // 4. Sembrar datos ya que el proveedor InMemory está registrado ahora.
             var sp = services.BuildServiceProvider();
             using var scope = sp.CreateScope();

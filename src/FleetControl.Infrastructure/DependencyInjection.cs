@@ -42,6 +42,7 @@ public static class DependencyInjection
         services.AddScoped<IPdfReportService, PdfReportService>();
         services.AddScoped<IExcelReportService, ExcelReportService>();
         services.AddHttpClient<ISupabaseStorageService, SupabaseStorageService>();
+        services.AddHttpClient<ISupabaseAuthAdminService, SupabaseAuthAdminService>();
         services.AddHttpClient<SupabaseJwksProvider>();
 
         // --- Background Service de alertas ---
